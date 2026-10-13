@@ -1,7 +1,8 @@
-export type HealthStatusType = 'HEALTHY' | 'DEGRADED' | 'DOWN' | 'UNKNOWN';
+export type HealthStatusType = 'HEALTHY' | 'OPERATIONAL' | 'DEGRADED' | 'DOWN' | 'UNKNOWN';
 
 export class HealthStatusVo {
   public static readonly HEALTHY = new HealthStatusVo('HEALTHY');
+  public static readonly OPERATIONAL = new HealthStatusVo('OPERATIONAL');
   public static readonly DEGRADED = new HealthStatusVo('DEGRADED');
   public static readonly DOWN = new HealthStatusVo('DOWN');
   public static readonly UNKNOWN = new HealthStatusVo('UNKNOWN');
@@ -13,6 +14,8 @@ export class HealthStatusVo {
       case 'HEALTHY':
       case 'UP':
         return HealthStatusVo.HEALTHY;
+      case 'OPERATIONAL':
+        return HealthStatusVo.OPERATIONAL;
       case 'DEGRADED':
         return HealthStatusVo.DEGRADED;
       case 'DOWN':
@@ -23,11 +26,15 @@ export class HealthStatusVo {
   }
 
   public isAvailable(): boolean {
-    return this.value === 'HEALTHY' || this.value === 'DEGRADED';
+    return this.value === 'HEALTHY' || this.value === 'OPERATIONAL' || this.value === 'DEGRADED';
   }
 
   public isHealthy(): boolean {
-    return this.value === 'HEALTHY';
+    return this.value === 'HEALTHY' || this.value === 'OPERATIONAL';
+  }
+
+  public isOperational(): boolean {
+    return this.value === 'HEALTHY' || this.value === 'OPERATIONAL';
   }
 
   public isDegraded(): boolean {

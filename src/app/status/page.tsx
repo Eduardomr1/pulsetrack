@@ -11,6 +11,8 @@ import {
   Clock,
   Shield,
   RefreshCw,
+  Calendar,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface PublicSlot {
@@ -40,13 +42,23 @@ interface PublicIncident {
   resolvedAt?: string | null;
 }
 
+interface PublicMaintenance {
+  id: string;
+  title: string;
+  description: string | null;
+  startTime: string;
+  endTime: string;
+  status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED';
+}
+
 interface StatusPageData {
-  globalStatus: 'OPERATIONAL' | 'DEGRADED' | 'OUTAGE';
+  globalStatus: 'OPERATIONAL' | 'DEGRADED' | 'OUTAGE' | 'MAINTENANCE';
   globalStatusMessage: string;
   updatedAt: string;
   services: PublicService[];
   activeIncidents: PublicIncident[];
   pastIncidents: PublicIncident[];
+  maintenance?: PublicMaintenance[];
 }
 
 export default function PublicStatusPage() {
@@ -79,12 +91,19 @@ export default function PublicStatusPage() {
   const isOperational = data?.globalStatus === 'OPERATIONAL';
   const isDegraded = data?.globalStatus === 'DEGRADED';
   const isOutage = data?.globalStatus === 'OUTAGE';
+  const isMaintenance = data?.globalStatus === 'MAINTENANCE';
 
   const bannerColor = isOperational
     ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
     : isDegraded
     ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+    : isMaintenance
+    ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
     : 'bg-red-500/10 border-red-500/30 text-red-400';
+
+  const activeOrUpcomingMaint = data?.maintenance?.filter(
+    (m) => m.status === 'IN_PROGRESS' || m.status === 'SCHEDULED'
+  );
 
   return (
     <div className="min-h-screen bg-[#070a12] text-slate-100 flex flex-col selection:bg-cyan-500 selection:text-white">
@@ -112,11 +131,18 @@ export default function PublicStatusPage() {
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <Link
+              href="/incidents"
+              className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/60 hover:bg-slate-700/60 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+              <span>Incidentes</span>
+            </Link>
+            <Link
               href="/"
               className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/60 hover:bg-slate-700/60 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Consola Interna</span>
+              <span>Consola</span>
             </Link>
           </div>
         </div>
@@ -132,137 +158,180 @@ export default function PublicStatusPage() {
             <div className="w-12 h-12 rounded-2xl bg-slate-900/60 flex items-center justify-center border border-current">
               {isOperational && <CheckCircle2 className="w-6 h-6 text-emerald-400" />}
               {isDegraded && <AlertTriangle className="w-6 h-6 text-amber-400" />}
+              {isMaintenance && <Calendar className="w-6 h-6 text-cyan-400" />}
               {isOutage && <XCircle className="w-6 h-6 text-red-400" />}
             </div>
             <div>
               <h2 className="text-xl font-extrabold tracking-tight text-white">
                 {data?.globalStatusMessage ?? 'Verificando estado de la red...'}
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Actualizado en tiempo real • {data ? new Date(data.updatedAt).toLocaleTimeString() : '—'}
+              <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5">
+                <Clock className="w-3 h-3 text-slate-500" />
+                <span>
+                  Última sincronización:{' '}
+                  {data?.updatedAt ? new Date(data.updatedAt).toLocaleTimeString() : '...'}
+                </span>
               </p>
             </div>
           </div>
-
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/60 border border-slate-700 text-xs font-mono text-slate-300">
-            <Shield className="w-3.5 h-3.5 text-emerald-400" />
-            <span>SLA Garantizado 99.9%</span>
-          </div>
         </section>
 
-        {/* Active Incidents Banner (if any) */}
-        {data && data.activeIncidents.length > 0 && (
+        {/* Scheduled Maintenance Notice Banner */}
+        {activeOrUpcomingMaint && activeOrUpcomingMaint.length > 0 && (
           <section className="space-y-3">
-            <h3 className="text-sm font-bold text-red-400 flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-red-400 animate-pulse" />
-              <span>Incidentes Activos en Curso ({data.activeIncidents.length})</span>
+            {activeOrUpcomingMaint.map((m) => {
+              const inProgress = m.status === 'IN_PROGRESS';
+              return (
+                <div
+                  key={m.id}
+                  className={`p-4 rounded-xl border space-y-2 ${
+                    inProgress
+                      ? 'border-cyan-500/50 bg-cyan-950/20 text-cyan-300'
+                      : 'border-amber-500/40 bg-amber-950/20 text-amber-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2 font-bold text-xs uppercase tracking-wider">
+                      <Calendar className="w-4 h-4" />
+                      {inProgress ? 'Mantenimiento Preventivo en Curso' : 'Mantenimiento Programado'}
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-400">
+                      {new Date(m.startTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })} - {new Date(m.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <h4 className="font-bold text-white text-sm">{m.title}</h4>
+                  {m.description && <p className="text-xs text-slate-300">{m.description}</p>}
+                </div>
+              );
+            })}
+          </section>
+        )}
+
+        {/* Active Incidents Section */}
+        {data?.activeIncidents && data.activeIncidents.length > 0 && (
+          <section className="space-y-3">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-red-400 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              <span>Incidencias en Curso</span>
             </h3>
-            <div className="space-y-2">
+
+            <div className="space-y-3">
               {data.activeIncidents.map((inc) => (
                 <div
                   key={inc.id}
-                  className="p-4 rounded-xl bg-red-950/20 border border-red-800/60 text-xs space-y-1.5"
+                  className="p-4 rounded-xl border border-red-500/40 bg-red-950/20 space-y-2 text-xs"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-white uppercase tracking-wider text-[11px]">
-                      {inc.severity} OUTAGE
+                    <span className="font-bold text-white flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                      {inc.summary}
                     </span>
-                    <span className="text-slate-400 font-mono text-[11px]">
-                      Iniciado: {new Date(inc.startedAt).toLocaleTimeString()}
+                    <span className="text-[10px] font-mono text-red-400 uppercase font-bold">
+                      {inc.severity}
                     </span>
                   </div>
-                  <p className="text-slate-300">{inc.summary}</p>
-                  <p className="text-[11px] text-amber-300">
-                    Nuestros ingenieros de guardia están investigando activamente y trabajando en la resolución.
-                  </p>
+                  <div className="text-[11px] text-slate-400">
+                    Detectado el {new Date(inc.startedAt).toLocaleString()}
+                  </div>
                 </div>
               ))}
             </div>
           </section>
         )}
 
-        {/* Component / Services Status List */}
+        {/* Services Status & 90-Day BetterStack-Style Strip */}
         <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
-              Servicios & APIs de Producción
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+              <Shield className="w-4 h-4 text-cyan-400" />
+              <span>Salud de Componentes & APIs ({data?.services.length ?? 0})</span>
             </h3>
-            <span className="text-xs text-slate-400 font-mono">Disponibilidad 90 días</span>
+            <span className="text-[11px] font-mono text-slate-500">Historial de Disponibilidad</span>
           </div>
 
-          <div className="rounded-2xl border border-slate-800 bg-[#0d1424] divide-y divide-slate-800/80 shadow-lg overflow-hidden">
+          <div className="space-y-4">
             {data?.services.map((svc) => {
-              const isHealthy = svc.currentStatus === 'HEALTHY';
-              const isDegradedStatus = svc.currentStatus === 'DEGRADED';
-              const isDown = svc.currentStatus === 'DOWN';
+              const isSvcHealthy = svc.currentStatus === 'HEALTHY';
+              const isSvcDegraded = svc.currentStatus === 'DEGRADED';
+              const isSvcDown = svc.currentStatus === 'DOWN';
+
+              const badgeColor = isSvcHealthy
+                ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-400'
+                : isSvcDegraded
+                ? 'border-amber-500/30 bg-amber-950/20 text-amber-400'
+                : isSvcDown
+                ? 'border-red-500/30 bg-red-950/20 text-red-400'
+                : 'border-slate-800 bg-slate-900 text-slate-400';
 
               return (
-                <div key={svc.id} className="p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-2.5 h-2.5 rounded-full ${
-                          isHealthy
-                            ? 'bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
-                            : isDegradedStatus
-                            ? 'bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.5)]'
-                            : isDown
-                            ? 'bg-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
-                            : 'bg-slate-500'
-                        }`}
-                      />
-                      <div>
-                        <h4 className="text-sm font-bold text-white">{svc.name}</h4>
-                        <span className="text-[11px] font-mono text-slate-400">
-                          Latencia Promedio: {svc.avgLatencyMs.toFixed(0)} ms
+                <div
+                  key={svc.id}
+                  className="p-5 rounded-2xl border border-slate-800 bg-[#0d1424] space-y-4 shadow-md hover:border-slate-700 transition"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2.5">
+                        <h4 className="font-bold text-white text-base">{svc.name}</h4>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeColor}`}>
+                          {svc.currentStatus}
                         </span>
                       </div>
+                      <span className="text-[11px] font-mono text-slate-500 truncate block mt-0.5">
+                        {svc.url}
+                      </span>
                     </div>
 
-                    <div className="flex items-center gap-4 text-right">
-                      <div>
-                        <div className="text-xs font-mono font-bold text-emerald-400">
-                          {svc.uptime90d.toFixed(2)}%
-                        </div>
-                        <div className="text-[10px] text-slate-500 uppercase tracking-wider">90 Días</div>
+                    <div className="flex items-center gap-4 text-xs font-mono">
+                      <div className="text-right">
+                        <span className="text-[10px] uppercase text-slate-500 block">24 Horas</span>
+                        <span className="font-bold text-emerald-400">{svc.uptime24h}%</span>
                       </div>
-
-                      <span
-                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
-                          isHealthy
-                            ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-400'
-                            : isDegradedStatus
-                            ? 'border-amber-500/30 bg-amber-950/20 text-amber-400'
-                            : 'border-red-500/30 bg-red-950/20 text-red-400'
-                        }`}
-                      >
-                        {isHealthy ? 'Operacional' : isDegradedStatus ? 'Degradado' : 'Caído'}
-                      </span>
+                      <div className="text-right">
+                        <span className="text-[10px] uppercase text-slate-500 block">90 Días</span>
+                        <span className="font-bold text-cyan-300">{svc.uptime90d}%</span>
+                      </div>
                     </div>
                   </div>
 
-                  {/* 30-Pill Visual Availability Strip */}
-                  <div className="flex items-center gap-[3px] h-3 bg-slate-900/60 p-0.5 rounded-lg border border-slate-800/80">
-                    {svc.slots.length > 0 ? (
-                      svc.slots.map((s, idx) => {
-                        let col = 'bg-slate-700/40';
-                        if (s.status === 'HEALTHY') col = 'bg-emerald-500';
-                        else if (s.status === 'DEGRADED') col = 'bg-amber-500';
-                        else if (s.status === 'DOWN') col = 'bg-red-500';
+                  {/* 30-Day Strip Simulation */}
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center gap-1 h-7">
+                      {svc.slots && svc.slots.length > 0 ? (
+                        svc.slots.map((slot, idx) => {
+                          const slotHealthy = slot.status === 'HEALTHY';
+                          const slotDegraded = slot.status === 'DEGRADED';
+                          const slotDown = slot.status === 'DOWN';
 
-                        return (
+                          const slotColor = slotHealthy
+                            ? 'bg-emerald-500 hover:bg-emerald-400'
+                            : slotDegraded
+                            ? 'bg-amber-500 hover:bg-amber-400'
+                            : slotDown
+                            ? 'bg-red-500 hover:bg-red-400'
+                            : 'bg-slate-700';
+
+                          return (
+                            <div
+                              key={idx}
+                              title={`${new Date(slot.timestamp).toLocaleDateString()}: ${slot.status} (${slot.latencyMs.toFixed(0)}ms)`}
+                              className={`flex-1 h-full rounded-sm transition-all cursor-pointer ${slotColor}`}
+                            />
+                          );
+                        })
+                      ) : (
+                        Array.from({ length: 30 }).map((_, idx) => (
                           <div
                             key={idx}
-                            title={`${new Date(s.timestamp).toLocaleDateString()}: ${s.status} (${s.latencyMs.toFixed(0)}ms)`}
-                            className={`flex-1 h-full rounded-[2px] transition hover:scale-y-125 ${col}`}
+                            title="Operación normal"
+                            className="flex-1 h-full rounded-sm bg-emerald-500/80 hover:bg-emerald-400 transition"
                           />
-                        );
-                      })
-                    ) : (
-                      <div className="w-full text-center text-[10px] text-slate-500 font-mono">
-                        Historial reciente activo
-                      </div>
-                    )}
+                        ))
+                      )}
+                    </div>
+                    <div className="flex justify-between text-[10px] font-mono text-slate-500">
+                      <span>Hace 30 días</span>
+                      <span>Hoy</span>
+                    </div>
                   </div>
                 </div>
               );
@@ -270,50 +339,36 @@ export default function PublicStatusPage() {
           </div>
         </section>
 
-        {/* Past Incidents Archive */}
-        <section className="space-y-4 pt-4 border-t border-slate-800">
-          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-            <Clock className="w-4 h-4 text-cyan-400" />
-            <span>Historial Reciente de Resoluciones</span>
-          </h3>
+        {/* Past Resolved Incidents Changelog */}
+        {data?.pastIncidents && data.pastIncidents.length > 0 && (
+          <section className="space-y-4 pt-4 border-t border-slate-800/80">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">
+              Historial de Incidentes Resueltos
+            </h3>
 
-          {data && data.pastIncidents.length > 0 ? (
-            <div className="space-y-3 text-xs">
-              {data.pastIncidents.map((inc) => (
-                <div
-                  key={inc.id}
-                  className="p-4 rounded-xl bg-slate-900/40 border border-slate-800 space-y-1.5"
-                >
-                  <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
-                    <span className="text-emerald-400 font-bold flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Resuelto
-                    </span>
-                    <span>
-                      {new Date(inc.startedAt).toLocaleDateString()} a las{' '}
-                      {new Date(inc.startedAt).toLocaleTimeString()}
+            <div className="space-y-3">
+              {data.pastIncidents.map((p) => (
+                <div key={p.id} className="p-4 rounded-xl border border-slate-800 bg-[#0d1424] text-xs space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-200">{p.summary}</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400">
+                      RESUELTO
                     </span>
                   </div>
-                  <h4 className="font-bold text-slate-200">{inc.summary}</h4>
-                  {inc.resolvedAt && (
-                    <p className="text-[11px] text-slate-500">
-                      Causa mitigada y tráfico restaurado el {new Date(inc.resolvedAt).toLocaleTimeString()}.
-                    </p>
-                  )}
+                  <div className="flex items-center gap-4 text-[11px] text-slate-500 font-mono">
+                    <span>Inició: {new Date(p.startedAt).toLocaleDateString()}</span>
+                    {p.resolvedAt && <span>Resuelto: {new Date(p.resolvedAt).toLocaleDateString()}</span>}
+                  </div>
                 </div>
               ))}
             </div>
-          ) : (
-            <p className="text-xs text-slate-500">No se han registrado incidentes en los últimos 30 días.</p>
-          )}
-        </section>
+          </section>
+        )}
       </main>
 
-      {/* Public Footer */}
-      <footer className="border-t border-slate-800/80 py-6 text-center text-xs text-slate-500">
-        <div className="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <span>Desarrollado con PulseTrack Observability Suite</span>
-          <span className="font-mono text-[11px]">SLA Monitor • Powered by Clean Architecture</span>
-        </div>
+      {/* Footer */}
+      <footer className="border-t border-slate-800/80 bg-[#0c1222]/80 py-6 text-center text-xs text-slate-500">
+        <p>Monitorizado continuamente por <strong>PulseTrack</strong> • Clean Architecture Observability Engine</p>
       </footer>
     </div>
   );

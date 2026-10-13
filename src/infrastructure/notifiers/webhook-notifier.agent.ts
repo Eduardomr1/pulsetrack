@@ -1,13 +1,13 @@
 import crypto from 'node:crypto';
 import { IAlertNotifier, AlertNotificationPayload } from '../../core/domain/ports/notifier.port';
 import { WebhookConfig } from '../../core/domain/entities/alert-channel.entity';
+import {
+  executeHttpDeliveryWithRetry,
+  RetryOptions,
+  WebhookDeliveryResult,
+} from './retry.util';
 
-export interface WebhookDeliveryResult {
-  success: boolean;
-  statusCode?: number;
-  errorMessage?: string;
-  attempts: number;
-}
+export type { WebhookDeliveryResult };
 
 export class WebhookNotifierAgent implements IAlertNotifier {
   constructor(private readonly config: WebhookConfig) {}
@@ -16,13 +16,14 @@ export class WebhookNotifierAgent implements IAlertNotifier {
     await this.deliverWithRetry(payload);
   }
 
-  public async deliverWithRetry(
-    payload: AlertNotificationPayload,
-    maxRetries: number = 3
-  ): Promise<WebhookDeliveryResult> {
+  /**
+   * Builds the structured JSON webhook payload including full telemetry,
+   * latency RED breakdown, assertions, and incident root cause/lifecycle.
+   */
+  public buildPayload(payload: AlertNotificationPayload) {
     const { endpoint, result, incident, type } = payload;
 
-    const bodyData = {
+    return {
       event: `endpoint.${type.toLowerCase()}`,
       timestamp: new Date().toISOString(),
       endpoint: {
@@ -30,6 +31,7 @@ export class WebhookNotifierAgent implements IAlertNotifier {
         name: endpoint.name,
         url: endpoint.url.value,
         method: endpoint.method.value,
+        intervalSeconds: endpoint.intervalSeconds,
         tags: endpoint.tags,
       },
       telemetry: {
@@ -37,7 +39,14 @@ export class WebhookNotifierAgent implements IAlertNotifier {
         statusCode: result.statusCode,
         statusText: result.statusText,
         region: result.region,
-        latency: result.latency.toJSON(),
+        latency: {
+          dnsLookupMs: result.latency.dnsLookupMs,
+          tcpConnectMs: result.latency.tcpConnectMs,
+          tlsHandshakeMs: result.latency.tlsHandshakeMs,
+          ttfbMs: result.latency.ttfbMs,
+          contentTransferMs: result.latency.contentTransferMs,
+          totalMs: result.latency.totalMs,
+        },
         sslInfo: result.sslInfo,
         failedAssertions: result.failedAssertions,
       },
@@ -47,13 +56,27 @@ export class WebhookNotifierAgent implements IAlertNotifier {
             status: incident.status,
             severity: incident.severity,
             startedAt: incident.startedAt.toISOString(),
+            resolvedAt: incident.resolvedAt ? incident.resolvedAt.toISOString() : null,
+            durationMinutes: incident.getDurationMinutes(),
             consecutiveFailures: incident.consecutiveFailures,
             summary: incident.summary,
+            rootCause: incident.rootCause,
+            timeline: incident.timeline,
           }
         : null,
     };
+  }
 
+  /**
+   * Delivers the webhook payload with exponential retries and HMAC-SHA256 authentication.
+   */
+  public async deliverWithRetry(
+    payload: AlertNotificationPayload,
+    options?: RetryOptions | number
+  ): Promise<WebhookDeliveryResult> {
+    const bodyData = this.buildPayload(payload);
     const rawBody = JSON.stringify(bodyData);
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'User-Agent': 'PulseTrack-WebhookAgent/1.0',
@@ -67,45 +90,22 @@ export class WebhookNotifierAgent implements IAlertNotifier {
       headers['X-PulseTrack-Signature'] = `sha256=${hmac.digest('hex')}`;
     }
 
-    let lastError: string | undefined;
-    let lastStatusCode: number | undefined;
+    const retryOpts: RetryOptions =
+      typeof options === 'number'
+        ? { maxRetries: options, timeoutMs: this.config.timeoutMs ?? 6000 }
+        : {
+            timeoutMs: this.config.timeoutMs ?? 6000,
+            ...options,
+          };
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 6000);
-
-        const response = await fetch(this.config.webhookUrl, {
-          method: 'POST',
-          headers,
-          body: rawBody,
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeout);
-        lastStatusCode = response.status;
-
-        if (response.ok) {
-          return { success: true, statusCode: response.status, attempts: attempt };
-        }
-
-        lastError = `HTTP ${response.status} ${response.statusText}`;
-      } catch (err: unknown) {
-        lastError = err instanceof Error ? err.message : 'Error desconocido al enviar webhook';
-      }
-
-      // Exponential backoff before next retry
-      if (attempt < maxRetries) {
-        const delay = Math.pow(2, attempt) * 200 + Math.random() * 100;
-        await new Promise((res) => setTimeout(res, delay));
-      }
-    }
-
-    return {
-      success: false,
-      statusCode: lastStatusCode,
-      errorMessage: lastError,
-      attempts: maxRetries,
-    };
+    return executeHttpDeliveryWithRetry(
+      this.config.webhookUrl,
+      {
+        method: 'POST',
+        headers,
+        body: rawBody,
+      },
+      retryOpts
+    );
   }
 }

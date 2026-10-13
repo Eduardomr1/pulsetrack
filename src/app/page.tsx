@@ -1,13 +1,9 @@
 'use client';
 
-import React, { useEffect, useState, useTransition } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   Activity,
-  CheckCircle2,
-  AlertTriangle,
-  XCircle,
-  Clock,
   ShieldCheck,
   RefreshCw,
   Plus,
@@ -15,70 +11,16 @@ import {
   Zap,
   Bell,
   Radio,
-  Settings,
-  Pause,
-  Play,
-  Download,
 } from 'lucide-react';
 import { usePulseStream } from '@/hooks/use-pulse-stream';
-import { UptimeBar, UptimeBucket } from '@/components/uptime-bar';
 import { IncidentsCard, ActiveIncidentItem, ResolvedIncidentItem } from '@/components/incidents-card';
 import { AlertChannelsModal } from '@/components/alert-channels-modal';
 import { EditEndpointModal, EndpointDataForEdit } from '@/components/edit-endpoint-modal';
-
-interface LatencyBreakdown {
-  dnsLookupMs: number;
-  tcpConnectMs: number;
-  tlsHandshakeMs: number;
-  ttfbMs: number;
-  contentTransferMs: number;
-  totalMs: number;
-}
-
-interface SslInfo {
-  valid: boolean;
-  issuer: string;
-  validTo: string;
-  daysRemaining: number;
-}
-
-interface LatestCheck {
-  id: string;
-  timestamp: string;
-  status: 'HEALTHY' | 'DEGRADED' | 'DOWN';
-  statusCode: number | null;
-  latency: LatencyBreakdown;
-  sslInfo: SslInfo | null;
-  failedAssertions: string[];
-  errorMessage: string | null;
-}
-
-interface EndpointSummary {
-  id: string;
-  name: string;
-  url: string;
-  method: string;
-  intervalSeconds: number;
-  timeoutMs: number;
-  isActive: boolean;
-  tags: string[];
-  latestCheck: LatestCheck | null;
-  historyBuckets?: UptimeBucket[];
-  aggregates: {
-    totalChecks: number;
-    healthyChecks: number;
-    degradedChecks: number;
-    downChecks: number;
-    uptimePercentage: number;
-    avgLatencyMs: number;
-    p50LatencyMs: number;
-    p95LatencyMs: number;
-    p99LatencyMs: number;
-  };
-}
+import { ServiceStatusCard, ServiceCardData } from '@/components/service-status-card';
+import { RegisterEndpointModal } from '@/components/register-endpoint-modal';
 
 export default function DashboardPage() {
-  const [endpoints, setEndpoints] = useState<EndpointSummary[]>([]);
+  const [endpoints, setEndpoints] = useState<ServiceCardData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [probingId, setProbingId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
@@ -90,7 +32,7 @@ export default function DashboardPage() {
   const [recentResolved, setRecentResolved] = useState<ResolvedIncidentItem[]>([]);
   const [mttrMinutes, setMttrMinutes] = useState<number>(0);
 
-  const handleToggleActive = async (ep: EndpointSummary) => {
+  const handleToggleActive = async (ep: ServiceCardData) => {
     try {
       const nextActive = !ep.isActive;
       setEndpoints((prev) =>
@@ -107,26 +49,17 @@ export default function DashboardPage() {
     }
   };
 
-  const [, startTransition] = useTransition();
-
   // SSE Live Pulse Stream
   const { isConnected, latestPulse } = usePulseStream({ enabled: true });
-
-  // Form State
-  const [newName, setNewName] = useState('');
-  const [newUrl, setNewUrl] = useState('');
-  const [newMethod, setNewMethod] = useState('GET');
-  const [newInterval, setNewInterval] = useState(30);
-  const [newSlaMs, setNewSlaMs] = useState(500);
 
   const fetchEndpoints = async () => {
     try {
       const res = await fetch('/api/endpoints');
       const json = await res.json();
       if (json.success) {
-        // Fetch 24h history for each endpoint for the BetterStack-style bar
+        // Fetch 24h history for each endpoint for the BetterStack-style bar and sparklines
         const enriched = await Promise.all(
-          json.data.map(async (ep: EndpointSummary) => {
+          json.data.map(async (ep: ServiceCardData) => {
             try {
               const hRes = await fetch(`/api/endpoints/${ep.id}/history?timeframe=24h`);
               const hJson = await hRes.json();
@@ -207,44 +140,16 @@ export default function DashboardPage() {
     }
   };
 
-  const handleCreateEndpoint = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName || !newUrl) return;
-
-    startTransition(async () => {
-      try {
-        const payload = {
-          name: newName,
-          url: newUrl,
-          method: newMethod,
-          intervalSeconds: Number(newInterval),
-          timeoutMs: 5000,
-          expectedStatusCodes: [200, 201, 204],
-          assertions: [
-            {
-              target: 'latency_ms',
-              operator: 'less_than',
-              expectedValue: Number(newSlaMs),
-            },
-          ],
-          tags: ['production'],
-        };
-
-        const res = await fetch('/api/endpoints', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-
-        if (res.ok) {
-          setShowAddModal(false);
-          setNewName('');
-          setNewUrl('');
-          await fetchEndpoints();
-        }
-      } catch (err) {
-        console.error('Error creating endpoint:', err);
-      }
+  const handleEditEndpoint = (ep: ServiceCardData) => {
+    setEditingEndpoint({
+      id: ep.id,
+      name: ep.name,
+      url: ep.url,
+      method: ep.method,
+      intervalSeconds: ep.intervalSeconds,
+      timeoutMs: ep.timeoutMs,
+      isActive: ep.isActive,
+      tags: ep.tags,
     });
   };
 
@@ -277,9 +182,9 @@ export default function DashboardPage() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-extrabold text-xl tracking-tight bg-gradient-to-r from-cyan-400 via-teal-300 to-emerald-400 bg-clip-text text-transparent">
+                <h1 className="font-extrabold text-xl tracking-tight bg-gradient-to-r from-cyan-400 via-teal-300 to-emerald-400 bg-clip-text text-transparent">
                   PulseTrack
-                </span>
+                </h1>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase font-bold tracking-wider bg-cyan-950 text-cyan-400 border border-cyan-800/50">
                   Clean Arch v1.0
                 </span>
@@ -343,7 +248,8 @@ export default function DashboardPage() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-8">
         {/* Fleet KPI Banner */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <section aria-label="Métricas de la Flota" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <h2 className="sr-only">Métricas Clave de la Flota</h2>
           <div className="p-5 rounded-2xl bg-[#0f172a]/90 border border-slate-800 shadow-sm relative overflow-hidden">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Monitores</span>
@@ -426,352 +332,36 @@ export default function DashboardPage() {
             </div>
           )}
 
+          {/* Tarjetas de estado en vivo con badges animados y sparklines */}
           <div className="grid grid-cols-1 gap-5">
-            {endpoints.map((ep) => {
-              const latest = ep.latestCheck;
-              const status = latest?.status ?? 'UNKNOWN';
-
-              const isHealthy = status === 'HEALTHY';
-              const isDegraded = status === 'DEGRADED';
-              const isDown = status === 'DOWN';
-
-              const statusColor = isHealthy
-                ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-400'
-                : isDegraded
-                ? 'border-amber-500/30 bg-amber-950/20 text-amber-400'
-                : isDown
-                ? 'border-red-500/30 bg-red-950/20 text-red-400'
-                : 'border-slate-800 bg-slate-900 text-slate-400';
-
-              const latency = latest?.latency;
-              const totalLatency = latency ? latency.totalMs : 0;
-
-              return (
-                <div
-                  key={ep.id}
-                  className="rounded-2xl border border-slate-800 bg-[#0d1424] p-5 shadow-lg hover:border-slate-700 transition space-y-4"
-                >
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                    {/* Header info */}
-                    <div className="space-y-1.5 flex-1 min-w-0">
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border flex items-center gap-1.5 ${statusColor}`}
-                        >
-                          {isHealthy && <CheckCircle2 className="w-3.5 h-3.5" />}
-                          {isDegraded && <AlertTriangle className="w-3.5 h-3.5" />}
-                          {isDown && <XCircle className="w-3.5 h-3.5" />}
-                          <span>{status}</span>
-                        </span>
-                        <Link
-                          href={`/endpoints/${ep.id}`}
-                          className="text-base font-bold text-white hover:text-cyan-400 transition underline-offset-4 hover:underline truncate"
-                        >
-                          {ep.name}
-                        </Link>
-                        <button
-                          onClick={() => handleToggleActive(ep)}
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold border flex items-center gap-1 transition ${
-                            ep.isActive
-                              ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-400 hover:bg-emerald-900/30'
-                              : 'border-amber-500/30 bg-amber-950/20 text-amber-400 hover:bg-amber-900/30'
-                          }`}
-                          title={ep.isActive ? 'Pausar sondeo automático' : 'Reanudar sondeo automático'}
-                        >
-                          {ep.isActive ? <Play className="w-2.5 h-2.5" /> : <Pause className="w-2.5 h-2.5" />}
-                          <span>{ep.isActive ? 'ACTIVO' : 'PAUSADO'}</span>
-                        </button>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-slate-400">
-                        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 font-bold text-[10px]">
-                          {ep.method}
-                        </span>
-                        <span className="text-slate-300 truncate">{ep.url}</span>
-                        <span className="text-slate-500">•</span>
-                        <span>Cada {ep.intervalSeconds}s</span>
-                      </div>
-                    </div>
-
-                    {/* Stats & Actions */}
-                    <div className="flex items-center gap-4 lg:gap-6">
-                      <div className="text-right">
-                        <div className="text-xs text-slate-400">Uptime 24h</div>
-                        <div className="text-base font-bold text-emerald-400">
-                          {ep.aggregates.uptimePercentage}%
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <div className="text-xs text-slate-400">Latencia Total</div>
-                        <div className="text-base font-bold text-amber-300">
-                          {totalLatency > 0 ? `${totalLatency.toFixed(1)} ms` : '—'}
-                        </div>
-                      </div>
-
-                      <div className="text-right hidden sm:block">
-                        <div className="text-xs text-slate-400">p95 / p99</div>
-                        <div className="text-xs font-mono text-slate-300">
-                          {ep.aggregates.p95LatencyMs}ms / {ep.aggregates.p99LatencyMs}ms
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {/* Export CSV link */}
-                        <a
-                          href={`/api/endpoints/${ep.id}/export?format=csv`}
-                          download
-                          className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 transition"
-                          title="Descargar telemetría CSV"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </a>
-
-                        {/* Edit Button */}
-                        <button
-                          onClick={() =>
-                            setEditingEndpoint({
-                              id: ep.id,
-                              name: ep.name,
-                              url: ep.url,
-                              method: ep.method,
-                              intervalSeconds: ep.intervalSeconds,
-                              timeoutMs: ep.timeoutMs,
-                              isActive: ep.isActive,
-                              tags: ep.tags,
-                            })
-                          }
-                          className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 transition"
-                          title="Configuración de endpoint"
-                        >
-                          <Settings className="w-3.5 h-3.5" />
-                        </button>
-
-                        <button
-                          onClick={() => handleProbe(ep.id)}
-                          disabled={probingId === ep.id}
-                          className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 flex items-center gap-2 transition disabled:opacity-50"
-                        >
-                          <RefreshCw className={`w-3.5 h-3.5 ${probingId === ep.id ? 'animate-spin' : ''}`} />
-                          <span>{probingId === ep.id ? 'Sondando...' : 'Sondar Ahora'}</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* BetterStack-Style Visual Uptime Bar */}
-                  {ep.historyBuckets && ep.historyBuckets.length > 0 && (
-                    <div className="pt-2">
-                      <UptimeBar
-                        buckets={ep.historyBuckets}
-                        uptimePercentage={ep.aggregates.uptimePercentage}
-                        timeframeLabel="Historial de Disponibilidad (24h)"
-                      />
-                    </div>
-                  )}
-
-                  {/* Telemetry Breakdown Bar */}
-                  {latency && totalLatency > 0 && (
-                    <div className="pt-3 border-t border-slate-800/80 space-y-2">
-                      <div className="flex items-center justify-between text-[11px] text-slate-400">
-                        <span className="font-semibold text-slate-300 flex items-center gap-1">
-                          <Clock className="w-3 h-3 text-cyan-400" /> Desglose de Socket & RED Telemetry
-                        </span>
-                        <span className="font-mono text-slate-400">
-                          Total: {totalLatency.toFixed(2)}ms (HTTP {latest?.statusCode ?? 'N/A'})
-                        </span>
-                      </div>
-
-                      {/* Stacked latency bar */}
-                      <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden flex shadow-inner">
-                        <div
-                          style={{ width: `${Math.max(2, (latency.dnsLookupMs / totalLatency) * 100)}%` }}
-                          title={`DNS: ${latency.dnsLookupMs}ms`}
-                          className="bg-indigo-500 h-full"
-                        />
-                        <div
-                          style={{ width: `${Math.max(2, (latency.tcpConnectMs / totalLatency) * 100)}%` }}
-                          title={`TCP Connect: ${latency.tcpConnectMs}ms`}
-                          className="bg-cyan-500 h-full"
-                        />
-                        <div
-                          style={{ width: `${Math.max(2, (latency.tlsHandshakeMs / totalLatency) * 100)}%` }}
-                          title={`TLS Handshake: ${latency.tlsHandshakeMs}ms`}
-                          className="bg-purple-500 h-full"
-                        />
-                        <div
-                          style={{ width: `${Math.max(2, (latency.ttfbMs / totalLatency) * 100)}%` }}
-                          title={`TTFB: ${latency.ttfbMs}ms`}
-                          className="bg-emerald-500 h-full"
-                        />
-                        <div
-                          style={{ width: `${Math.max(2, (latency.contentTransferMs / totalLatency) * 100)}%` }}
-                          title={`Transfer: ${latency.contentTransferMs}ms`}
-                          className="bg-amber-500 h-full"
-                        />
-                      </div>
-
-                      {/* Legend */}
-                      <div className="flex flex-wrap items-center gap-4 text-[10px] text-slate-400 pt-0.5 font-mono">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-indigo-500" />
-                          <span>DNS: {latency.dnsLookupMs}ms</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-cyan-500" />
-                          <span>TCP: {latency.tcpConnectMs}ms</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-purple-500" />
-                          <span>TLS: {latency.tlsHandshakeMs}ms</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                          <span>TTFB: {latency.ttfbMs}ms</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-amber-500" />
-                          <span>Transfer: {latency.contentTransferMs}ms</span>
-                        </div>
-
-                        {latest?.sslInfo && (
-                          <div className="ml-auto text-slate-400 flex items-center gap-1">
-                            <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                            <span>SSL: {latest.sslInfo.daysRemaining}d ({latest.sslInfo.issuer})</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Failed Assertions alert */}
-                      {latest?.failedAssertions && latest.failedAssertions.length > 0 && (
-                        <div className="mt-2 p-2 rounded-lg bg-amber-950/40 border border-amber-800/50 text-[11px] text-amber-300">
-                          {latest.failedAssertions.map((err, idx) => (
-                            <div key={idx} className="flex items-center gap-1.5">
-                              <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-                              <span>{err}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {endpoints.map((ep) => (
+              <ServiceStatusCard
+                key={ep.id}
+                service={ep}
+                isProbing={probingId === ep.id}
+                onProbe={handleProbe}
+                onToggleActive={handleToggleActive}
+                onEdit={handleEditEndpoint}
+              />
+            ))}
           </div>
         </section>
       </main>
 
-      {/* Modal: New Endpoint */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-[#0f172a] border border-slate-800 shadow-2xl p-6 space-y-5 animate-in fade-in duration-200">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Plus className="w-4 h-4 text-cyan-400" /> Registrar Nuevo Endpoint
-              </h3>
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="text-slate-400 hover:text-white transition"
-              >
-                ✕
-              </button>
-            </div>
+      {/* Modal Accesible: Registrar Nuevo Endpoint con selector de intervalo y método HTTP */}
+      <RegisterEndpointModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSuccess={fetchEndpoints}
+      />
 
-            <form onSubmit={handleCreateEndpoint} className="space-y-4 text-xs">
-              <div>
-                <label className="block font-semibold text-slate-300 mb-1">Nombre del Servicio / API</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Auth Gateway API"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-300 mb-1">URL Objetivo (HTTP / HTTPS)</label>
-                <input
-                  type="url"
-                  required
-                  placeholder="https://api.empresa.com/health"
-                  value={newUrl}
-                  onChange={(e) => setNewUrl(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Método HTTP</label>
-                  <select
-                    value={newMethod}
-                    onChange={(e) => setNewMethod(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-cyan-500"
-                  >
-                    <option value="GET">GET</option>
-                    <option value="POST">POST</option>
-                    <option value="HEAD">HEAD</option>
-                    <option value="OPTIONS">OPTIONS</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-300 mb-1">Intervalo (segundos)</label>
-                  <input
-                    type="number"
-                    min={5}
-                    value={newInterval}
-                    onChange={(e) => setNewInterval(Number(e.target.value))}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-300 mb-1">SLA Latencia Máxima (ms)</label>
-                <input
-                  type="number"
-                  min={50}
-                  step={50}
-                  value={newSlaMs}
-                  onChange={(e) => setNewSlaMs(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 focus:outline-none focus:border-cyan-500"
-                />
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Si la latencia total supera este umbral, el estado cambiará automáticamente a DEGRADED.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold transition shadow-md"
-                >
-                  Guardar & Activar Monitoreo
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Alert Channels Management */}
+      {/* Modal: Gestión de Canales de Alerta */}
       <AlertChannelsModal
         isOpen={showAlertModal}
         onClose={() => setShowAlertModal(false)}
       />
 
-      {/* Modal: Edit Endpoint Configuration */}
+      {/* Modal: Configuración / Edición de Endpoint */}
       <EditEndpointModal
         endpoint={editingEndpoint}
         isOpen={editingEndpoint !== null}

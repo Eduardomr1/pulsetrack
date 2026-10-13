@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
+import { desc } from 'drizzle-orm';
 import { endpointRepository, healthCheckRepository, incidentRepository } from '@/infrastructure/container';
 import { initDatabase } from '@/infrastructure/db/migrate-local';
+import { db } from '@/infrastructure/db/drizzle.client';
+import { maintenanceWindowsTable } from '@/infrastructure/db/schema/maintenance-windows.schema';
 
 let isDbReady = false;
 async function ensureDb() {
@@ -66,15 +69,51 @@ export async function GET() {
       })
     );
 
-    let globalStatus: 'OPERATIONAL' | 'DEGRADED' | 'OUTAGE' = 'OPERATIONAL';
+    // Fetch Maintenance Windows
+    const rawMaintenance = await db
+      .select()
+      .from(maintenanceWindowsTable)
+      .orderBy(desc(maintenanceWindowsTable.startTime))
+      .limit(5);
+
+    const now = Date.now();
+    const maintenance = rawMaintenance.map((m) => {
+      let status = m.status;
+      const start = m.startTime.getTime();
+      const end = m.endTime.getTime();
+
+      if (m.status !== 'COMPLETED') {
+        if (now >= start && now <= end) {
+          status = 'IN_PROGRESS';
+        } else if (now > end) {
+          status = 'COMPLETED';
+        }
+      }
+
+      return {
+        id: m.id,
+        title: m.title,
+        description: m.description,
+        startTime: m.startTime.toISOString(),
+        endTime: m.endTime.toISOString(),
+        status,
+      };
+    });
+
+    const activeMaintenance = maintenance.find((m) => m.status === 'IN_PROGRESS');
+
+    let globalStatus: 'OPERATIONAL' | 'DEGRADED' | 'OUTAGE' | 'MAINTENANCE' = 'OPERATIONAL';
     let globalStatusMessage = 'Todos los sistemas operando con normalidad';
 
     if (hasDown) {
       globalStatus = 'OUTAGE';
-      globalStatusMessage = 'Interrupción en uno o más servicios';
+      globalStatusMessage = 'Interrupción del servicio detectada en uno o más componentes';
     } else if (hasDegraded) {
       globalStatus = 'DEGRADED';
-      globalStatusMessage = 'Rendimiento degradado en algunos componentes';
+      globalStatusMessage = 'Rendimiento degradado o latencia elevada';
+    } else if (activeMaintenance) {
+      globalStatus = 'MAINTENANCE';
+      globalStatusMessage = `Mantenimiento preventivo en curso: ${activeMaintenance.title}`;
     }
 
     return NextResponse.json({
@@ -99,6 +138,7 @@ export async function GET() {
           startedAt: inc.startedAt.toISOString(),
           resolvedAt: inc.resolvedAt?.toISOString() ?? null,
         })),
+        maintenance,
       },
     });
   } catch (err: unknown) {

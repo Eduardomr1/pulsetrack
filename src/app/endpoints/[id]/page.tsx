@@ -16,6 +16,7 @@ import {
   Settings,
   Pause,
   Play,
+  ShieldAlert,
 } from 'lucide-react';
 import { LatencyBreakdownChart, LatencyDataPoint } from '@/components/latency-breakdown-chart';
 import { ErrorBudgetWidget } from '@/components/error-budget-widget';
@@ -252,6 +253,16 @@ export default function EndpointDetailPage({
               {endpoint.isActive ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
               <span>{endpoint.isActive ? 'Pausar' : 'Reanudar'}</span>
             </button>
+
+            {/* Incidents link */}
+            <Link
+              href="/incidents"
+              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 transition"
+              title="Centro de mando de incidentes"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+              <span>Incidentes</span>
+            </Link>
 
             {/* Export CSV Button */}
             <a

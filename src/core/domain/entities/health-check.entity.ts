@@ -21,6 +21,8 @@ export interface HealthCheckResultProps {
   failedAssertions: string[];
   responseHeaders?: Record<string, string>;
   region?: string;
+  errorCode?: string | null;
+  resolvedAddress?: string | null;
 }
 
 export class HealthCheckResult {
@@ -36,6 +38,8 @@ export class HealthCheckResult {
   public readonly failedAssertions: readonly string[];
   public readonly responseHeaders: Record<string, string>;
   public readonly region: string;
+  public readonly errorCode: string | null;
+  public readonly resolvedAddress: string | null;
 
   constructor(props: HealthCheckResultProps) {
     this.id = props.id;
@@ -50,10 +54,16 @@ export class HealthCheckResult {
     this.failedAssertions = Object.freeze([...props.failedAssertions]);
     this.responseHeaders = props.responseHeaders ?? {};
     this.region = props.region ?? 'primary';
+    this.errorCode = props.errorCode ?? null;
+    this.resolvedAddress = props.resolvedAddress ?? null;
   }
 
   public isSuccess(): boolean {
     return this.status.isHealthy();
+  }
+
+  public isOperational(): boolean {
+    return this.status.isOperational();
   }
 
   public isDegraded(): boolean {

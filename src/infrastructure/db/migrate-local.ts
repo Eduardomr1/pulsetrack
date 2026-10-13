@@ -54,15 +54,36 @@ export async function initDatabase(): Promise<void> {
       status TEXT NOT NULL,
       severity TEXT NOT NULL,
       started_at INTEGER NOT NULL,
+      acknowledged_at INTEGER,
       resolved_at INTEGER,
       summary TEXT NOT NULL,
-      consecutive_failures INTEGER NOT NULL DEFAULT 1
+      root_cause TEXT,
+      consecutive_failures INTEGER NOT NULL DEFAULT 1,
+      timeline TEXT NOT NULL DEFAULT '[]'
     );
   `);
+
+  // Safe migrations if incidents table already existed
+  try { await libsqlClient.execute(`ALTER TABLE incidents ADD COLUMN acknowledged_at INTEGER;`); } catch {}
+  try { await libsqlClient.execute(`ALTER TABLE incidents ADD COLUMN root_cause TEXT;`); } catch {}
+  try { await libsqlClient.execute(`ALTER TABLE incidents ADD COLUMN timeline TEXT NOT NULL DEFAULT '[]';`); } catch {}
 
   await libsqlClient.execute(`
     CREATE INDEX IF NOT EXISTS idx_incidents_endpoint_status 
     ON incidents (endpoint_id, status);
+  `);
+
+  await libsqlClient.execute(`
+    CREATE TABLE IF NOT EXISTS maintenance_windows (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      start_time INTEGER NOT NULL,
+      end_time INTEGER NOT NULL,
+      affected_endpoints TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'SCHEDULED',
+      created_at INTEGER NOT NULL
+    );
   `);
 
   await libsqlClient.execute(`

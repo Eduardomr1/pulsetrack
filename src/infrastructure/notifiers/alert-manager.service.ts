@@ -11,6 +11,7 @@ import { UrlVo } from '../../core/domain/value-objects/url.vo';
 import { HttpMethodVo } from '../../core/domain/value-objects/http-method.vo';
 import { HealthStatusVo } from '../../core/domain/value-objects/health-status.vo';
 import { LatencyBreakdownVo } from '../../core/domain/value-objects/latency-breakdown.vo';
+import { desc } from 'drizzle-orm';
 import { notificationLogsTable } from '../db/schema/alert-channels.schema';
 
 export interface ThrottlingConfig {
@@ -57,6 +58,15 @@ export class AlertManagerService implements IAlertNotifier {
 
   public getChannel(channelId: string): AlertChannel | undefined {
     return this.channels.get(channelId)?.channel;
+  }
+
+  public async getRecentNotificationLogs(limit: number = 50) {
+    if (!this.db) return [];
+    return this.db
+      .select()
+      .from(notificationLogsTable)
+      .orderBy(desc(notificationLogsTable.timestamp))
+      .limit(limit);
   }
 
   public async testChannel(
@@ -123,21 +133,21 @@ export class AlertManagerService implements IAlertNotifier {
 
     try {
       if (agent instanceof WebhookNotifierAgent) {
-        const res = await agent.deliverWithRetry(testPayload, 1);
+        const res = await agent.deliverWithRetry(testPayload, { maxRetries: 1 });
         return {
           success: res.success,
           statusCode: res.statusCode ?? (res.success ? 200 : 500),
           error: res.errorMessage,
         };
       } else if (agent instanceof SlackNotifierAgent) {
-        const res = await agent.deliver(testPayload);
+        const res = await agent.deliverWithRetry(testPayload, { maxRetries: 1 });
         return {
           success: res.success,
           statusCode: res.statusCode ?? (res.success ? 200 : 500),
           error: res.errorMessage,
         };
       } else if (agent instanceof DiscordNotifierAgent) {
-        const res = await agent.deliver(testPayload);
+        const res = await agent.deliverWithRetry(testPayload, { maxRetries: 1 });
         return {
           success: res.success,
           statusCode: res.statusCode ?? (res.success ? 204 : 500),
@@ -193,12 +203,12 @@ export class AlertManagerService implements IAlertNotifier {
             errorMessage = res.errorMessage ?? null;
             responseCode = res.statusCode ?? null;
           } else if (agent instanceof SlackNotifierAgent) {
-            const res = await agent.deliver(payload);
+            const res = await agent.deliverWithRetry(payload);
             status = res.success ? 'SENT' : 'FAILED';
             errorMessage = res.errorMessage ?? null;
             responseCode = res.statusCode ?? null;
           } else if (agent instanceof DiscordNotifierAgent) {
-            const res = await agent.deliver(payload);
+            const res = await agent.deliverWithRetry(payload);
             status = res.success ? 'SENT' : 'FAILED';
             errorMessage = res.errorMessage ?? null;
             responseCode = res.statusCode ?? null;

@@ -72,6 +72,10 @@ if (process.env.INCIDENT_WEBHOOK_URL) {
   );
 }
 
+import { StateTransitionDetector } from '../core/engine/state-transition-detector';
+
+export const stateTransitionDetector = new StateTransitionDetector();
+
 export const proberEngine = new HttpProberEngine(process.env.MONITOR_REGION ?? 'us-east-edge');
 
 export const executeProbeUseCase = new ExecuteProbeUseCase(
@@ -79,7 +83,8 @@ export const executeProbeUseCase = new ExecuteProbeUseCase(
   healthCheckRepository,
   incidentRepository,
   alertManagerService,
-  telemetryEventBus
+  telemetryEventBus,
+  stateTransitionDetector
 );
 
 export const registerEndpointUseCase = new RegisterEndpointUseCase(

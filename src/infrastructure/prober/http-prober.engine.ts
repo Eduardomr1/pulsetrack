@@ -3,14 +3,19 @@ import { IProberEngine } from '../../core/domain/ports/prober.port';
 import { Endpoint } from '../../core/domain/entities/endpoint.entity';
 import { HealthCheckResult } from '../../core/domain/entities/health-check.entity';
 import { HealthStatusVo } from '../../core/domain/value-objects/health-status.vo';
-import { executeTelemetryProbe } from './http-telemetry-agent';
+import { executeTelemetryProbe, RawProbeResult, TelemetryProbeOptions } from './http-telemetry-agent';
 import { AssertionEvaluator } from './assertion-evaluator';
 
+export type TelemetryProbeFunction = (options: TelemetryProbeOptions) => Promise<RawProbeResult>;
+
 export class HttpProberEngine implements IProberEngine {
-  constructor(private readonly region: string = 'primary-node') {}
+  constructor(
+    private readonly region: string = 'primary-node',
+    private readonly probeFn: TelemetryProbeFunction = executeTelemetryProbe
+  ) {}
 
   public async probe(endpoint: Endpoint): Promise<HealthCheckResult> {
-    const rawResult = await executeTelemetryProbe({
+    const rawResult = await this.probeFn({
       url: endpoint.url.value,
       method: endpoint.method.value,
       headers: endpoint.headers,
@@ -56,11 +61,13 @@ export class HttpProberEngine implements IProberEngine {
       failedAssertions,
       responseHeaders: rawResult.responseHeaders,
       region: this.region,
+      errorCode: rawResult.errorCode,
+      resolvedAddress: rawResult.resolvedAddress,
     });
   }
 
-  public async probeRaw(endpoint: Endpoint) {
-    return executeTelemetryProbe({
+  public async probeRaw(endpoint: Endpoint): Promise<RawProbeResult> {
+    return this.probeFn({
       url: endpoint.url.value,
       method: endpoint.method.value,
       headers: endpoint.headers,

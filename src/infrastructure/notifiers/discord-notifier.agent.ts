@@ -1,24 +1,34 @@
 import { IAlertNotifier, AlertNotificationPayload } from '../../core/domain/ports/notifier.port';
 import { DiscordConfig } from '../../core/domain/entities/alert-channel.entity';
+import {
+  executeHttpDeliveryWithRetry,
+  RetryOptions,
+  DiscordDeliveryResult,
+} from './retry.util';
 
-export interface DiscordDeliveryResult {
-  success: boolean;
-  statusCode?: number;
-  errorMessage?: string;
-}
+export type { DiscordDeliveryResult };
 
 export class DiscordNotifierAgent implements IAlertNotifier {
   constructor(private readonly config: DiscordConfig) {}
 
   public async notify(payload: AlertNotificationPayload): Promise<void> {
-    await this.deliver(payload);
+    await this.deliverWithRetry(payload);
   }
 
   public async deliver(payload: AlertNotificationPayload): Promise<DiscordDeliveryResult> {
+    return this.deliverWithRetry(payload);
+  }
+
+  /**
+   * Builds the rich Discord webhook embed payload with full RED latency metrics,
+   * incident lifecycle (start, duration, root cause, resolution), and role mentions.
+   */
+  public buildPayload(payload: AlertNotificationPayload) {
     const { endpoint, result, incident, type } = payload;
 
     const isDown = type === 'DOWN';
     const isDegraded = type === 'DEGRADED';
+    const isRecovered = type === 'RECOVERED';
 
     const color = isDown ? 0xef4444 : isDegraded ? 0xf59e0b : 0x10b981;
     const emoji = isDown ? '🚨' : isDegraded ? '⚠️' : '✅';
@@ -41,13 +51,13 @@ export class DiscordNotifierAgent implements IAlertNotifier {
         inline: true,
       },
       {
-        name: '🌍 Región',
+        name: '🌍 Región Sonda',
         value: `\`${result.region}\``,
         inline: true,
       },
       {
-        name: '⏱️ Desglose de Fases (RED Telemetry)',
-        value: `\`DNS:\` ${result.latency.dnsLookupMs}ms | \`TCP:\` ${result.latency.tcpConnectMs}ms | \`TLS:\` ${result.latency.tlsHandshakeMs}ms | \`TTFB:\` ${result.latency.ttfbMs}ms`,
+        name: '⏱️ Desglose Telemetría RED',
+        value: `\`DNS:\` ${result.latency.dnsLookupMs.toFixed(1)}ms | \`TCP:\` ${result.latency.tcpConnectMs.toFixed(1)}ms | \`TLS:\` ${result.latency.tlsHandshakeMs.toFixed(1)}ms | \`TTFB:\` ${result.latency.ttfbMs.toFixed(1)}ms | \`Transfer:\` ${result.latency.contentTransferMs.toFixed(1)}ms`,
         inline: false,
       },
     ];
@@ -63,14 +73,40 @@ export class DiscordNotifierAgent implements IAlertNotifier {
     if (result.sslInfo) {
       fields.push({
         name: '🔒 Certificado SSL / TLS',
-        value: `Válido: **${result.sslInfo.daysRemaining} días** restantes (${result.sslInfo.issuer})`,
+        value: `Válido: **${result.sslInfo.daysRemaining} días restantes** (${result.sslInfo.issuer})`,
         inline: false,
       });
     }
 
-    let description = `La sonda de salud ha registrado un cambio de estado a **${type}**.`;
     if (incident) {
-      description = `**Incidente:** ${incident.summary}\n**Fallos Consecutivos:** ${incident.consecutiveFailures} | **Severidad:** ${incident.severity}`;
+      const incidentLines = [
+        `• **ID Incidente:** \`${incident.id}\``,
+        `• **Severidad:** \`${incident.severity}\` | **Estado:** \`${incident.status}\``,
+        `• **Inicio:** \`${incident.startedAt.toISOString()}\``,
+        `• **Duración:** **${incident.getDurationMinutes()} min**`,
+        `• **Fallos Consecutivos:** \`${incident.consecutiveFailures}\``,
+        `• **Causa Raíz:** ${incident.rootCause ?? incident.summary}`,
+      ];
+
+      if (incident.resolvedAt) {
+        incidentLines.push(`• **Resolución:** Mitigado a las \`${incident.resolvedAt.toISOString()}\``);
+      }
+
+      fields.push({
+        name: '💥 Registro de Incidente & Causa Raíz',
+        value: incidentLines.join('\n'),
+        inline: false,
+      });
+    }
+
+    let description = isDown
+      ? '🚨 **Caída de Servicio Crítica:** La sonda HTTP detectó indisponibilidad o fallo severo de conectividad.'
+      : isDegraded
+      ? '⚠️ **Degradación de Rendimiento / SLA:** El endpoint responde pero sobrepasa los umbrales de latencia estipulados.'
+      : '✅ **Servicio Recuperado:** La sonda ha verificado que el servicio ha vuelto a operar dentro de parámetros normales.';
+
+    if (incident && !isRecovered) {
+      description += `\n**Resumen:** ${incident.summary}`;
     }
 
     const embed = {
@@ -87,37 +123,42 @@ export class DiscordNotifierAgent implements IAlertNotifier {
 
     let content: string | undefined = undefined;
     if (isDown && this.config.mentionRoleId) {
-      content = `<@&${this.config.mentionRoleId}> Incidente crítico detectado en ${endpoint.name}!`;
+      content = `<@&${this.config.mentionRoleId}> 🚨 ¡Incidente crítico detectado en ${endpoint.name}!`;
     }
 
-    const discordPayload = {
+    return {
       username: this.config.username ?? 'PulseTrack Bot',
       avatar_url: this.config.avatarUrl,
       content,
       embeds: [embed],
     };
+  }
 
-    try {
-      const response = await fetch(this.config.webhookUrl, {
+  /**
+   * Delivers the rich Discord embed with exponential retries and error backoff.
+   */
+  public async deliverWithRetry(
+    payload: AlertNotificationPayload,
+    options?: RetryOptions | number
+  ): Promise<DiscordDeliveryResult> {
+    const discordPayload = this.buildPayload(payload);
+    const rawBody = JSON.stringify(discordPayload);
+
+    const retryOpts: RetryOptions =
+      typeof options === 'number'
+        ? { maxRetries: options }
+        : {
+            ...options,
+          };
+
+    return executeHttpDeliveryWithRetry(
+      this.config.webhookUrl,
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(discordPayload),
-      });
-
-      if (!response.ok) {
-        return {
-          success: false,
-          statusCode: response.status,
-          errorMessage: `Discord API error: ${response.status} ${response.statusText}`,
-        };
-      }
-
-      return { success: true, statusCode: 204 };
-    } catch (err: unknown) {
-      return {
-        success: false,
-        errorMessage: err instanceof Error ? err.message : 'Error de conexión con Discord',
-      };
-    }
+        body: rawBody,
+      },
+      retryOpts
+    );
   }
 }

@@ -23,6 +23,17 @@ npm-debug.log*
 *.swp
 *.swo
 
+# Next.js
+.next/
+out/
+
+# Database
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.tsbuildinfo
+
 # OS files
 .DS_Store
 Thumbs.db

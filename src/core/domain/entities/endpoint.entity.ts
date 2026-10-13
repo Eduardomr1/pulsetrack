@@ -17,6 +17,9 @@ export interface EndpointProps {
   tags: string[];
   createdAt: Date;
   updatedAt: Date;
+  consecutiveFailuresThreshold?: number;
+  consecutiveDegradedThreshold?: number;
+  consecutiveSuccessThreshold?: number;
 }
 
 export class Endpoint {
@@ -34,6 +37,9 @@ export class Endpoint {
   public tags: string[];
   public readonly createdAt: Date;
   public updatedAt: Date;
+  public consecutiveFailuresThreshold: number;
+  public consecutiveDegradedThreshold: number;
+  public consecutiveSuccessThreshold: number;
 
   constructor(props: EndpointProps) {
     if (!props.name || props.name.trim().length === 0) {
@@ -60,6 +66,9 @@ export class Endpoint {
     this.tags = props.tags;
     this.createdAt = props.createdAt;
     this.updatedAt = props.updatedAt;
+    this.consecutiveFailuresThreshold = Math.max(1, props.consecutiveFailuresThreshold ?? 3);
+    this.consecutiveDegradedThreshold = Math.max(1, props.consecutiveDegradedThreshold ?? 2);
+    this.consecutiveSuccessThreshold = Math.max(1, props.consecutiveSuccessThreshold ?? 2);
   }
 
   public pause(): void {
@@ -83,6 +92,15 @@ export class Endpoint {
     if (props.expectedStatusCodes !== undefined) this.expectedStatusCodes = props.expectedStatusCodes;
     if (props.assertions !== undefined) this.assertions = props.assertions;
     if (props.tags !== undefined) this.tags = props.tags;
+    if (props.consecutiveFailuresThreshold !== undefined) {
+      this.consecutiveFailuresThreshold = Math.max(1, props.consecutiveFailuresThreshold);
+    }
+    if (props.consecutiveDegradedThreshold !== undefined) {
+      this.consecutiveDegradedThreshold = Math.max(1, props.consecutiveDegradedThreshold);
+    }
+    if (props.consecutiveSuccessThreshold !== undefined) {
+      this.consecutiveSuccessThreshold = Math.max(1, props.consecutiveSuccessThreshold);
+    }
     this.updatedAt = new Date();
   }
 }

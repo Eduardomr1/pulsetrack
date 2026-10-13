@@ -1,20 +1,29 @@
 import { IAlertNotifier, AlertNotificationPayload } from '../../core/domain/ports/notifier.port';
 import { SlackConfig } from '../../core/domain/entities/alert-channel.entity';
+import {
+  executeHttpDeliveryWithRetry,
+  RetryOptions,
+  SlackDeliveryResult,
+} from './retry.util';
 
-export interface SlackDeliveryResult {
-  success: boolean;
-  statusCode?: number;
-  errorMessage?: string;
-}
+export type { SlackDeliveryResult };
 
 export class SlackNotifierAgent implements IAlertNotifier {
   constructor(private readonly config: SlackConfig) {}
 
   public async notify(payload: AlertNotificationPayload): Promise<void> {
-    await this.deliver(payload);
+    await this.deliverWithRetry(payload);
   }
 
   public async deliver(payload: AlertNotificationPayload): Promise<SlackDeliveryResult> {
+    return this.deliverWithRetry(payload);
+  }
+
+  /**
+   * Builds the rich Slack Block Kit payload with outage details, status,
+   * full RED socket telemetry breakdown, and incident lifecycle tracking.
+   */
+  public buildPayload(payload: AlertNotificationPayload) {
     const { endpoint, result, incident, type } = payload;
 
     const isDown = type === 'DOWN';
@@ -23,10 +32,10 @@ export class SlackNotifierAgent implements IAlertNotifier {
     const color = isDown ? '#EF4444' : isDegraded ? '#F59E0B' : '#10B981';
     const emoji = isDown ? '🚨' : isDegraded ? '⚠️' : '✅';
     const headline = isDown
-      ? `Caída de Servicio Detectada (DOWN)`
+      ? 'Caída de Servicio Detectada (DOWN)'
       : isDegraded
-      ? `Degradación de Rendimiento / SLA (DEGRADED)`
-      : `Servicio Recuperado (RECOVERED)`;
+      ? 'Degradación de Rendimiento / SLA (DEGRADED)'
+      : 'Servicio Recuperado (RECOVERED)';
 
     const mentionPrefix =
       isDown && this.config.mentionOnCritical ? '<!channel> ' : '';
@@ -44,7 +53,7 @@ export class SlackNotifierAgent implements IAlertNotifier {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `${mentionPrefix}*Endpoint:* <${endpoint.url.value}|${endpoint.name}>\n*Método:* \`${endpoint.method.value}\` | *Intervalo:* ${endpoint.intervalSeconds}s`,
+          text: `${mentionPrefix}*Endpoint:* <${endpoint.url.value}|${endpoint.name}>\n*Método:* \`${endpoint.method.value}\` | *Intervalo:* ${endpoint.intervalSeconds}s | *Tags:* ${endpoint.tags.join(', ') || 'none'}`,
         },
       },
       {
@@ -72,7 +81,7 @@ export class SlackNotifierAgent implements IAlertNotifier {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*⏱️ Desglose Telemetría RED:* \n\`DNS: ${result.latency.dnsLookupMs}ms\` • \`TCP: ${result.latency.tcpConnectMs}ms\` • \`TLS: ${result.latency.tlsHandshakeMs}ms\` • \`TTFB: ${result.latency.ttfbMs}ms\``,
+          text: `*⏱️ Desglose Telemetría RED:*\n\`DNS: ${result.latency.dnsLookupMs.toFixed(1)}ms\` • \`TCP: ${result.latency.tcpConnectMs.toFixed(1)}ms\` • \`TLS: ${result.latency.tlsHandshakeMs.toFixed(1)}ms\` • \`TTFB: ${result.latency.ttfbMs.toFixed(1)}ms\` • \`Transfer: ${result.latency.contentTransferMs.toFixed(1)}ms\``,
         },
       },
     ];
@@ -87,19 +96,41 @@ export class SlackNotifierAgent implements IAlertNotifier {
       });
     }
 
-    if (incident) {
+    if (result.sslInfo) {
       blocks.push({
         type: 'context',
         elements: [
           {
             type: 'mrkdwn',
-            text: `*Incidente ID:* \`${incident.id}\` | *Fallos Consecutivos:* ${incident.consecutiveFailures} | *Severidad:* \`${incident.severity}\``,
+            text: `*🔒 Certificado SSL / TLS:* Válido por *${result.sslInfo.daysRemaining} días* (${result.sslInfo.issuer})`,
           },
         ],
       });
     }
 
-    const slackPayload = {
+    if (incident) {
+      const incidentInfo = [
+        `*💥 Detalles del Incidente & Causa Raíz:*`,
+        `• *ID:* \`${incident.id}\` | *Severidad:* \`${incident.severity}\` | *Estado:* \`${incident.status}\``,
+        `• *Inicio:* ${incident.startedAt.toISOString()} | *Duración:* *${incident.getDurationMinutes()} min*`,
+        `• *Causa Raíz:* ${incident.rootCause ?? incident.summary}`,
+        `• *Fallos Consecutivos:* ${incident.consecutiveFailures}`,
+      ];
+
+      if (incident.resolvedAt) {
+        incidentInfo.push(`• *Resolución:* Mitigado y verificado a las ${incident.resolvedAt.toISOString()}`);
+      }
+
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: incidentInfo.join('\n'),
+        },
+      });
+    }
+
+    return {
       channel: this.config.channel,
       attachments: [
         {
@@ -108,28 +139,33 @@ export class SlackNotifierAgent implements IAlertNotifier {
         },
       ],
     };
+  }
 
-    try {
-      const response = await fetch(this.config.webhookUrl, {
+  /**
+   * Delivers the rich Slack message with exponential retries and backoff.
+   */
+  public async deliverWithRetry(
+    payload: AlertNotificationPayload,
+    options?: RetryOptions | number
+  ): Promise<SlackDeliveryResult> {
+    const slackPayload = this.buildPayload(payload);
+    const rawBody = JSON.stringify(slackPayload);
+
+    const retryOpts: RetryOptions =
+      typeof options === 'number'
+        ? { maxRetries: options }
+        : {
+            ...options,
+          };
+
+    return executeHttpDeliveryWithRetry(
+      this.config.webhookUrl,
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(slackPayload),
-      });
-
-      if (!response.ok) {
-        return {
-          success: false,
-          statusCode: response.status,
-          errorMessage: `Slack API error: ${response.status} ${response.statusText}`,
-        };
-      }
-
-      return { success: true, statusCode: 200 };
-    } catch (err: unknown) {
-      return {
-        success: false,
-        errorMessage: err instanceof Error ? err.message : 'Error de conexión con Slack',
-      };
-    }
+        body: rawBody,
+      },
+      retryOpts
+    );
   }
 }
