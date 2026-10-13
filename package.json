@@ -15,6 +15,7 @@
     "probe:demo": "tsx src/infrastructure/prober/demo.ts",
     "notifiers:demo": "tsx src/infrastructure/notifiers/demo-notifiers.ts",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
