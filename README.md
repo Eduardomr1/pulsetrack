@@ -82,6 +82,17 @@ graph TD
 
 ---
 
+## 🛡️ SRE Error Budgets, Multi-Burn-Rate & Automated Postmortems
+
+PulseTrack incorpora capacidades avanzadas de ingeniería de confiabilidad de sitios (SRE) alineadas a los lineamientos de Google Cloud SRE:
+
+- **Multi-Window Multi-Burn-Rate SLO Engine:** Evaluación simultánea de ventanas cortas (alerta rápida ante degradaciones severas) y ventanas largas (detección proactiva de fuga gradual de error budget).
+- **Incident Coalescence & Anti-Flapping Hysteresis:** Fusión de micro-cortes intermitentes y supresión de alertas en cascada durante ventanas de flapping.
+- **Maintenance Windows:** Exclusión precisa de degradaciones programadas en los cálculos de disponibilidad, MTTD y MTTR.
+- **Automated SRE Postmortem Generator:** Exportación estructurada de postmortems con análisis de causa raíz, cronología de eventos y evaluación de crédito de servicio SLA.
+
+---
+
 ## 🚀 Puesta en Marcha
 
 ### Prerrequisitos
