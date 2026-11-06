@@ -3,7 +3,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black.svg?logo=next.js&logoColor=white)](https://nextjs.org/)
 [![Drizzle ORM](https://img.shields.io/badge/Drizzle_ORM-SQLite-orange.svg?logo=sqlite&logoColor=white)](https://orm.drizzle.team/)
-[![Vitest](https://img.shields.io/badge/Vitest-68_tests_passed-green.svg?logo=vitest&logoColor=white)](https://vitest.dev/)
+[![Vitest](https://img.shields.io/badge/Vitest-115_tests_passed-green.svg?logo=vitest&logoColor=white)](https://vitest.dev/)
 [![Playwright](https://img.shields.io/badge/Playwright-E2E_%26_A11y-45ba4b.svg?logo=playwright&logoColor=white)](https://playwright.dev/)
 [![WCAG 2.1 AA](https://img.shields.io/badge/A11y-WCAG_2.1_AA_Compliant-blueviolet.svg)](https://www.w3.org/WAI/WCAG21/quickref/)
 
@@ -82,7 +82,7 @@ graph TD
 
 ---
 
-## 🛡️ SRE Error Budgets, Multi-Burn-Rate & Automated Postmortems
+## 🛡️ SRE Error Budgets, Multi-Burn-Rate, Automated Postmortems & Blast Radius
 
 PulseTrack incorpora capacidades avanzadas de ingeniería de confiabilidad de sitios (SRE) alineadas a los lineamientos de Google Cloud SRE:
 
@@ -90,6 +90,7 @@ PulseTrack incorpora capacidades avanzadas de ingeniería de confiabilidad de si
 - **Incident Coalescence & Anti-Flapping Hysteresis:** Fusión de micro-cortes intermitentes y supresión de alertas en cascada durante ventanas de flapping.
 - **Maintenance Windows:** Exclusión precisa de degradaciones programadas en los cálculos de disponibilidad, MTTD y MTTR.
 - **Automated SRE Postmortem Generator:** Exportación estructurada de postmortems con análisis de causa raíz, cronología de eventos y evaluación de crédito de servicio SLA.
+- **Service Dependency Topology & Blast Radius Engine:** Modelado de grafos acíclicos dirigidos (DAG) de dependencias (Tier 0, 1 y 2), cálculo de disponibilidad compuesta serial vs. redundante con fallbacks, detección de ciclos y puntos únicos de falla (SPOF), y simulación de fallas en cascada con recomendaciones automatizadas de remediación SRE.
 
 ---
 
