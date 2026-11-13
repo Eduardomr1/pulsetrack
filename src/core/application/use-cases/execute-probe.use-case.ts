@@ -2,15 +2,32 @@ import { randomUUID } from 'node:crypto';
 import { Endpoint } from '../../domain/entities/endpoint.entity';
 import { HealthCheckResult } from '../../domain/entities/health-check.entity';
 import { Incident } from '../../domain/entities/incident.entity';
+import { MaintenanceWindow } from '../../domain/entities/maintenance-window.entity';
 import { IProberEngine } from '../../domain/ports/prober.port';
 import { IHealthCheckRepository } from '../../domain/ports/health-check.repository';
 import { IIncidentRepository } from '../../domain/ports/incident.repository';
+import { IMaintenanceWindowRepository } from '../../domain/ports/maintenance-window.repository';
 import { IAlertNotifier } from '../../domain/ports/notifier.port';
 import { TelemetryEventBus, telemetryEventBus } from '@/infrastructure/events/telemetry-event-bus';
 import { StateTransitionDetector, StateEvaluationResult } from '../../engine/state-transition-detector';
 
 export interface ExecuteProbeCommand {
   endpoint: Endpoint;
+}
+
+export type ProbeIncidentAction =
+  | 'NONE'
+  | 'TRIGGERED'
+  | 'ESCALATED'
+  | 'RESOLVED'
+  | 'SUPPRESSED_BY_MAINTENANCE';
+
+export interface ProbeExecutionOutcome {
+  readonly result: HealthCheckResult;
+  readonly suppressedByMaintenance: boolean;
+  readonly activeMaintenanceWindowId: string | null;
+  readonly activeMaintenanceTitle: string | null;
+  readonly incidentAction: ProbeIncidentAction;
 }
 
 export class ExecuteProbeUseCase {
@@ -20,39 +37,81 @@ export class ExecuteProbeUseCase {
     private readonly incidentRepo: IIncidentRepository,
     private readonly notifier?: IAlertNotifier,
     private readonly eventBus: TelemetryEventBus = telemetryEventBus,
-    private readonly stateDetector: StateTransitionDetector = new StateTransitionDetector()
+    private readonly stateDetector: StateTransitionDetector = new StateTransitionDetector(),
+    private readonly maintenanceWindowRepo?: IMaintenanceWindowRepository
   ) {}
 
   public async execute(command: ExecuteProbeCommand): Promise<HealthCheckResult> {
+    const outcome = await this.executeWithOutcome(command);
+    return outcome.result;
+  }
+
+  /**
+   * Ejecuta una sonda telemétrica completa devolviendo metadatos sobre si las alertas
+   * o generación de incidentes fueron suprimidos por una ventana de mantenimiento activa.
+   */
+  public async executeWithOutcome(
+    command: ExecuteProbeCommand
+  ): Promise<ProbeExecutionOutcome> {
     const { endpoint } = command;
 
     // 1. Run low-level telemetry probe & assertion evaluation
     const result = await this.prober.probe(endpoint);
 
-    // 2. Persist health check sample in time-series storage
+    // 2. Persist health check sample in time-series storage (siempre visible en telemetría)
     await this.healthCheckRepo.save(result);
 
-    // 3. Process state transition with anti-false-positive filtering
-    const transitionResult = this.stateDetector.processSample(endpoint.id, result, {
-      consecutiveFailuresThreshold: endpoint.consecutiveFailuresThreshold,
-      consecutiveDegradedThreshold: endpoint.consecutiveDegradedThreshold,
-      consecutiveSuccessThreshold: endpoint.consecutiveSuccessThreshold,
-    });
+    // 3. Check if endpoint is currently covered by an active scheduled maintenance window
+    const activeMaintenance = await this.findActiveMaintenance(endpoint.id, result.timestamp);
 
-    // 4. Incident State Machine & Notification Transition
-    await this.handleIncidentLifecycle(endpoint, result, transitionResult);
+    let incidentAction: ProbeIncidentAction = 'NONE';
+    let suppressedByMaintenance = false;
 
-    // 5. Emit probe result in real-time to event bus subscribers
+    if (activeMaintenance && !result.status.isHealthy()) {
+      // Durante mantenimiento programado, suprimimos la generación/escalamiento de incidentes
+      // y evitamos acumular fallos en el detector de transición para no disparar alertas en falso.
+      suppressedByMaintenance = true;
+      incidentAction = 'SUPPRESSED_BY_MAINTENANCE';
+    } else {
+      // 4. Process state transition with anti-false-positive filtering
+      const transitionResult = this.stateDetector.processSample(endpoint.id, result, {
+        consecutiveFailuresThreshold: endpoint.consecutiveFailuresThreshold,
+        consecutiveDegradedThreshold: endpoint.consecutiveDegradedThreshold,
+        consecutiveSuccessThreshold: endpoint.consecutiveSuccessThreshold,
+      });
+
+      // 5. Incident State Machine & Notification Transition
+      incidentAction = await this.handleIncidentLifecycle(endpoint, result, transitionResult);
+    }
+
+    // 6. Emit probe result in real-time to event bus subscribers
     this.eventBus.emitProbeResult({ endpoint, result });
 
-    return result;
+    return {
+      result,
+      suppressedByMaintenance,
+      activeMaintenanceWindowId: activeMaintenance?.id ?? null,
+      activeMaintenanceTitle: activeMaintenance?.title ?? null,
+      incidentAction,
+    };
+  }
+
+  private async findActiveMaintenance(
+    endpointId: string,
+    timestamp: Date
+  ): Promise<MaintenanceWindow | null> {
+    if (!this.maintenanceWindowRepo) {
+      return null;
+    }
+    const activeWindows = await this.maintenanceWindowRepo.findActiveAt(timestamp, endpointId);
+    return activeWindows.find((win) => win.isEffective()) ?? null;
   }
 
   private async handleIncidentLifecycle(
     endpoint: Endpoint,
     result: HealthCheckResult,
     transitionResult?: StateEvaluationResult
-  ): Promise<void> {
+  ): Promise<ProbeIncidentAction> {
     const activeIncident = await this.incidentRepo.findActiveByEndpointId(endpoint.id);
 
     const isConfirmedDown = transitionResult
@@ -84,7 +143,10 @@ export class ExecuteProbeUseCase {
           endpointId: endpoint.id,
           type: 'ESCALATED',
         });
-      } else if (hasJustTransitionedToDown || !transitionResult) {
+        return 'ESCALATED';
+      }
+
+      if (hasJustTransitionedToDown || !transitionResult) {
         const consecutiveCount = transitionResult ? transitionResult.consecutiveFailures : 1;
         const reason =
           result.errorMessage ??
@@ -120,6 +182,7 @@ export class ExecuteProbeUseCase {
             type: 'DOWN',
           });
         }
+        return 'TRIGGERED';
       }
     } else if (isConfirmedOperational && activeIncident) {
       // Endpoint has recovered!
@@ -145,6 +208,9 @@ export class ExecuteProbeUseCase {
           type: 'RECOVERED',
         });
       }
+      return 'RESOLVED';
     }
+
+    return 'NONE';
   }
 }
