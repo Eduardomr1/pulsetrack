@@ -3,9 +3,11 @@ import { DrizzleEndpointRepository } from './db/repositories/drizzle-endpoint.re
 import { DrizzleHealthCheckRepository } from './db/repositories/drizzle-health-check.repository';
 import { DrizzleIncidentRepository } from './db/repositories/drizzle-incident.repository';
 import { DrizzleAlertChannelRepository } from './db/repositories/drizzle-alert-channel.repository';
+import { DrizzleMaintenanceWindowRepository } from './db/repositories/drizzle-maintenance-window.repository';
 import { HttpProberEngine } from './prober/http-prober.engine';
 import { ExecuteProbeUseCase } from '../core/application/use-cases/execute-probe.use-case';
 import { RegisterEndpointUseCase } from '../core/application/use-cases/register-endpoint.use-case';
+import { ScheduleMaintenanceWindowUseCase } from '../core/application/use-cases/schedule-maintenance-window.use-case';
 import { PollingScheduler } from './scheduler/polling-scheduler';
 import { AlertManagerService } from './notifiers/alert-manager.service';
 import { AlertChannel } from '../core/domain/entities/alert-channel.entity';
@@ -16,6 +18,7 @@ export const endpointRepository = new DrizzleEndpointRepository(db);
 export const healthCheckRepository = new DrizzleHealthCheckRepository(db);
 export const incidentRepository = new DrizzleIncidentRepository(db);
 export const alertChannelRepository = new DrizzleAlertChannelRepository(db);
+export const maintenanceWindowRepository = new DrizzleMaintenanceWindowRepository(db);
 export const alertManagerService = new AlertManagerService(db, { cooldownSeconds: 30 });
 
 // Auto-register default channels if environment variables are configured
@@ -84,7 +87,12 @@ export const executeProbeUseCase = new ExecuteProbeUseCase(
   incidentRepository,
   alertManagerService,
   telemetryEventBus,
-  stateTransitionDetector
+  stateTransitionDetector,
+  maintenanceWindowRepository
+);
+
+export const scheduleMaintenanceWindowUseCase = new ScheduleMaintenanceWindowUseCase(
+  maintenanceWindowRepository
 );
 
 export const registerEndpointUseCase = new RegisterEndpointUseCase(
