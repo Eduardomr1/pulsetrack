@@ -3,7 +3,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black.svg?logo=next.js&logoColor=white)](https://nextjs.org/)
 [![Drizzle ORM](https://img.shields.io/badge/Drizzle_ORM-SQLite-orange.svg?logo=sqlite&logoColor=white)](https://orm.drizzle.team/)
-[![Vitest](https://img.shields.io/badge/Vitest-115_tests_passed-green.svg?logo=vitest&logoColor=white)](https://vitest.dev/)
+[![Vitest](https://img.shields.io/badge/Vitest-131_tests_passed-green.svg?logo=vitest&logoColor=white)](https://vitest.dev/)
 [![Playwright](https://img.shields.io/badge/Playwright-E2E_%26_A11y-45ba4b.svg?logo=playwright&logoColor=white)](https://playwright.dev/)
 [![WCAG 2.1 AA](https://img.shields.io/badge/A11y-WCAG_2.1_AA_Compliant-blueviolet.svg)](https://www.w3.org/WAI/WCAG21/quickref/)
 
@@ -88,7 +88,8 @@ PulseTrack incorpora capacidades avanzadas de ingeniería de confiabilidad de si
 
 - **Multi-Window Multi-Burn-Rate SLO Engine:** Evaluación simultánea de ventanas cortas (alerta rápida ante degradaciones severas) y ventanas largas (detección proactiva de fuga gradual de error budget).
 - **Incident Coalescence & Anti-Flapping Hysteresis:** Fusión de micro-cortes intermitentes y supresión de alertas en cascada durante ventanas de flapping.
-- **Maintenance Windows:** Exclusión precisa de degradaciones programadas en los cálculos de disponibilidad, MTTD y MTTR.
+- **Maintenance Windows & Probe Suppression:** Exclusión precisa de degradaciones programadas en los cálculos de disponibilidad, MTTD y MTTR, junto con supresión automática de creación/escalamiento de incidentes y alertas en `ExecuteProbeUseCase` durante ventanas activas respaldada por `DrizzleMaintenanceWindowRepository`.
+- **Maintenance Schedule Advisor:** Auditoría previa de colisiones temporales (`DIRECT_OVERLAP`, `WILDCARD_OVERLAP`, `ADJACENT_WINDOW`), evaluación de cobertura sobre el grafo de dependencias downstream (`ServiceDependencyTopologyService`) y estimación de Error Budget mensual protegido.
 - **Automated SRE Postmortem Generator:** Exportación estructurada de postmortems con análisis de causa raíz, cronología de eventos y evaluación de crédito de servicio SLA.
 - **Service Dependency Topology & Blast Radius Engine:** Modelado de grafos acíclicos dirigidos (DAG) de dependencias (Tier 0, 1 y 2), cálculo de disponibilidad compuesta serial vs. redundante con fallbacks, detección de ciclos y puntos únicos de falla (SPOF), y simulación de fallas en cascada con recomendaciones automatizadas de remediación SRE.
 
@@ -133,13 +134,12 @@ npm run dev
 
 | Capa | Archivos / Módulos | Tests | Estado |
 |---|---|---|---|
-| **Domain** | `Endpoint`, `HealthCheck`, `Incident` | 2 | ✅ 100% |
-| **Engine & Prober** | `HttpProberEngine`, `TelemetryAgent`, Socket Diagnostics | 7 | ✅ 100% |
-| **Notifiers & Retry** | `retry.util`, Exponential Backoff, Jitter, HTTP Handlers | 11 | ✅ 100% |
+| **Domain & SRE Services** | `Endpoint`, `MaintenanceScheduleAdvisorService`, `TopologyService`, `SLO`, `Latency` | 50 | ✅ 100% |
+| **Application Use Cases** | `ExecuteProbeUseCase`, `ScheduleMaintenanceWindowUseCase`, `BlastRadius`, `Reliability` | 15 | ✅ 100% |
+| **Infrastructure & DB** | `DrizzleMaintenanceWindowRepository`, `HttpProberEngine`, `retry.util` | 21 | ✅ 100% |
 | **View Models** | `register-endpoint-validation`, `sparkline-math`, `status-presentation` | 37 | ✅ 100% |
 | **UI Components** | `<StatusBadge />`, `<LatencySparkline />`, `<ServiceStatusCard />`, `<RegisterEndpointModal />` | 11 | ✅ 100% |
-| **E2E & A11y** | Axe-core WCAG 2.1 AA, navegación por teclado y flujos de status | 3 | ✅ 100% |
-| **Total** | **PulseTrack Test Suite** | **68+ Tests** | **✅ 100% Verde** |
+| **Total** | **PulseTrack Test Suite** | **131 Tests (19 Suites)** | **✅ 100% Verde** |
 
 ---
 
